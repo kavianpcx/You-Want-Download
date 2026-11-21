@@ -26,9 +26,7 @@
   "build": {
     "appId": "com.youwantdownload.desktop",
     "productName": "You Want Download",
-    "asar": {
-      "contentAlignment": 512
-    },
+    "asar": true,
     "files": [
       "app/**/*",
       "ui/**/*",
