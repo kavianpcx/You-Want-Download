@@ -1,8 +1,0 @@
-{
-  "manifest_version": 3,
-  "name": "You Want Download - Send Links",
-  "version": "0.1.0",
-  "description": "Send downloadable links to You Want Download using the custom protocol.",
-  "permissions": ["contextMenus"],
-  "background": {"service_worker": "background.js"}
-}

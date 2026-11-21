@@ -1,99 +1,92 @@
-name: Test, package and release Windows
-
+name: Test and release lightweight Windows app
 on:
   push:
     branches: [main]
     paths-ignore: ['**/*.md', 'assets/**']
   workflow_dispatch:
-
 permissions:
   contents: write
-
 jobs:
-  test:
-    name: Test download engine (Linux)
+  engine:
+    name: Test Go download engine (Linux)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-go@v5
         with:
-          node-version: '22'
-      - run: npm install --no-audit --no-fund
-      - run: npm run check
-      - run: npm test
-
+          go-version: '1.24.x'
+      - name: Engine correctness and race tests
+        run: go test -race -count=1 ./internal/downloader
+      - name: Format check
+        shell: bash
+        run: |
+          test -z "$(gofmt -l internal/downloader/*.go app.go main.go)"
+      - name: Check frontend JavaScript
+        run: node --check frontend/dist/app.js
   windows:
-    name: Test and build installer + portable (Windows x64)
-    needs: test
+    name: Build and verify Windows Setup + Portable
+    needs: engine
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install --no-audit --no-fund
-      - run: npm run check
-      - run: npm test
-      - run: npm run dist:win -- --publish never
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      - name: Verify release payloads
+      - name: Test engine on Windows
+        run: go test -count=1 ./internal/downloader
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1
+      - name: Build compact Windows executable
         shell: pwsh
         run: |
-          $installer = @(Get-ChildItem release -Filter '*Setup.exe')
-          $portable  = @(Get-ChildItem release -Filter '*Portable.exe')
-          $manifest  = @(Get-ChildItem release -Filter 'latest.yml')
-          if ($installer.Count -lt 1 -or $portable.Count -lt 1 -or $manifest.Count -lt 1) { throw 'Missing installer, portable executable or auto-update manifest' }
-          Write-Host "Installer: $($installer[0].Name)"
-          Write-Host "Portable: $($portable[0].Name)"
+          wails build -platform windows/amd64 -webview2 embed -o You-Want-Download.exe
+          if (-not (Test-Path 'build/bin/You-Want-Download.exe')) { throw 'Wails executable missing' }
+      - name: Build NSIS installer and portable executable
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          $env:PATH += ';C:\Program Files (x86)\NSIS'
+          $version = '0.2.0'
+          New-Item release -ItemType Directory -Force | Out-Null
+          Copy-Item 'build/bin/You-Want-Download.exe' "release/You-Want-Download-$version-Portable.exe"
+          Push-Location build/windows
+          & 'C:\Program Files (x86)\NSIS\makensis.exe' "/DAPP_VERSION=$version" installer.nsi
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS installer build failed' }
+          Pop-Location
+          $setup = "release/You-Want-Download-$version-x64-Setup.exe"
+          $portable = "release/You-Want-Download-$version-Portable.exe"
+          if (-not (Test-Path $setup) -or -not (Test-Path $portable)) { throw 'Missing release artifact' }
+          $size = (Get-Item $portable).Length / 1MB
+          Write-Host "Portable executable: $([math]::Round($size,2)) MB"
+          if ($size -ge 45) { throw "Portable size regression: $([math]::Round($size,2)) MB" }
+          Get-FileHash $setup -Algorithm SHA256 | Format-List
+          Get-FileHash $portable -Algorithm SHA256 | Format-List
       - uses: actions/upload-artifact@v4
         with:
-          name: you-want-download-windows-x64
-          path: |
-            release/*.exe
-            release/*.blockmap
-            release/latest.yml
+          name: you-want-download-0.2.0-windows-x64
+          path: release/*.exe
           if-no-files-found: error
-
   release:
-    name: Publish versioned release (if new)
+    name: Publish tested release
     needs: windows
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set version and check existing tag
-        id: version
+      - uses: actions/download-artifact@v4
+        with:
+          name: you-want-download-0.2.0-windows-x64
+          path: release
+      - name: Publish v0.2.0 if missing
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
-          VERSION=$(node -p 'require("./package.json").version')
-          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
-          if gh release view "v${VERSION}" >/dev/null 2>&1; then
-            echo 'exists=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'exists=false' >> "$GITHUB_OUTPUT"
+          if gh release view v0.2.0 >/dev/null 2>&1; then
+            echo 'v0.2.0 already published'; exit 0
           fi
-      - uses: actions/download-artifact@v4
-        if: steps.version.outputs.exists == 'false'
-        with:
-          name: you-want-download-windows-x64
-          path: release
-      - uses: softprops/action-gh-release@v2
-        if: steps.version.outputs.exists == 'false'
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: You Want Download ${{ steps.version.outputs.tag }}
-          target_commitish: ${{ github.sha }}
-          prerelease: false
-          generate_release_notes: true
-          body: |
-            Early preview release. Windows binaries are not code signed.
-            Download correctness tests passed on Linux and Windows before packaging.
-            The installed edition is configured for differential NSIS updates; the portable edition updates manually.
-            This version does not yet match every IDM/FDM feature.
-          files: |
-            release/*.exe
-            release/*.blockmap
-            release/latest.yml
-          fail_on_unmatched_files: true
+          gh release create v0.2.0 release/*.exe --target "${GITHUB_SHA}" \
+            --title 'You Want Download v0.2.0 - Lightweight redesign' \
+            --notes 'Redesigned compact interface, Go download engine, per-file connection control (1-16), queue, restart resume, Windows portable and installer. Requires WebView2. This release checks GitHub for updates but does not implement differential in-app updates yet. Unsigned binaries; see source and CI details.'

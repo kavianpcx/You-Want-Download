@@ -1,87 +1,84 @@
 <div align="center">
-  <h1>⬇️ You Want Download</h1>
-  <p><strong>A modern, free and open-source Windows download manager.</strong></p>
-  <p>HTTP(S) acceleration · Pause & resume · Smart queue · Scheduling · Portable or installed</p>
-  <p><a href="https://github.com/kavianpcx/You-Want-Download/releases">Download latest release</a> · <a href="https://github.com/kavianpcx/You-Want-Download/issues">Report a problem</a> · <a href="CONTRIBUTING.md">Contribute</a></p>
+
+# You Want Download
+
+**A compact, free, MIT-licensed Windows download manager.**
+
+Parallel HTTP(S) downloads · Queue · Pause/resume · Per-file connections · Portable and installer
+
+[Download releases](https://github.com/kavianpcx/You-Want-Download/releases) · [Report a bug](https://github.com/kavianpcx/You-Want-Download/issues) · [Contribute](CONTRIBUTING.md)
+
 </div>
 
-![You Want Download dark interface: sidebar, transfer summary and download progress](assets/app-preview.webp)
+![Compact You Want Download v0.2 desktop interface showing the download list, progress, connections, and file details](assets/app-preview-v0.2.webp)
 
-<sub>UI screenshot rendered from the application's actual HTML/CSS using sample data for design preview. It does **not** represent a live transfer or a verified Windows installer.</sub>
+*Screenshot from the actual HTML/CSS interface in Chromium with **clearly labeled sample downloads**. It is a UI preview, not an assertion that these transfers occurred or that the Windows executable was exercised on this Linux environment.*
 
-## What works in v0.1.0
+## What's new in v0.2.0
 
-- **Real HTTP and HTTPS transfers** with streaming to disk, redirects, retries and HTTP error reporting.
-- **Multi-connection downloads** when the server supports `Range` requests and provides a valid file size. Up to 8 concurrent downloads and 8 connections per file.
-- **Pause and resume** with individual on-disk segments and crash/restart recovery when server-side byte ranges are supported. Servers without ranges safely restart a partial transfer instead of concatenating bad bytes.
-- **Automatic queue** with configurable simultaneous downloads and optional future start time per download.
-- **File management**: destination folder, safe file naming, filename collision avoidance, search and status filters, reveal completed files in Explorer.
-- **Browser context menu extension** (Chromium-family browsers): right-click a link, select **Download with You Want Download**. Installs separately as an unpacked extension; uses the `ywd://` desktop protocol.
-- **Installed-app updates**: in-app check, download progress, restart/install via GitHub Releases. The NSIS installer uses update blockmaps for **differential downloads** when the server and previous release permit it. A full-package fallback is possible.
-- **Portable Windows build**: no installer required. Check updates manually using the application's Releases link; portable in-place differential updates are **not** implemented.
-- A lightweight dark UI with restricted Electron preload bridge (`contextIsolation`, sandbox and no renderer Node.js integration).
+The old v0.1 Electron dashboard was replaced with **Go + Wails/WebView2** to produce a much smaller standalone Windows executable. Instead of a hero banner, large statistic cards, and tiny action icons, the app uses a focused download table, a consistent icon system, a small toolbar, explicit settings, and a details pane.
 
-> **Important:** This is an early working foundation, **not feature parity with Internet Download Manager or Free Download Manager**. Torrent/magnet support, video capture, DRM media downloading, site grabbing, FTP, automatic browser-wide interception, custom queues with individual policies, global bandwidth limits and automatic portable binary patching are not implemented. Do not rely on it for irreplaceable downloads before independent Windows verification.
+- **Choose 1, 2, 4, 8, or 16 connections** for each new HTTP(S) download, with a separate **default** in Settings. The engine automatically limits segmentation when the file is small or the server doesn't support verified byte ranges. This is **not a guarantee of a speed increase**.
+- **Pause, resume, queue, schedule:** streaming to safe temporary segment files, preserving disk progress through an app restart. If a server doesn't support byte ranges, a partial transfer restarts safely from zero.
+- **Concurrent files:** choose 1–8 simultaneous downloads; older queued tasks start first.
+- **Details and actions:** file size, bytes written, progress, transfer rate, connection count, URL, destination; change connections on jobs that haven't started; open completed downloads in Explorer; remove a task without deleting the final file.
+- **Search and filters:** all, downloading, queued/paused, completed and failed.
+- **Simpler Windows distribution:** portable `.exe` and per-user NSIS installer. Uses the Windows WebView2 Runtime instead of bundling an entire Chromium browser. On a machine without WebView2 the application offers the Microsoft bootstrapper.
+- **Older-download migration:** best-effort import of the previous Electron `downloads.json` from its Windows roaming application-data folder, keeping original download files untouched.
+- **Updates:** a manual GitHub Releases version check from within the app.
 
-## Download and install
+> **No feature-parity claim with Internet Download Manager (IDM) or Free Download Manager (FDM).** HTTP/HTTPS and reliable transfers are the implemented scope. Torrent/magnet links, browser-wide interception, video-site capture, proxy profiles, speed limits, individually named recurring queues, and automatic *differential* patch updates are **not** implemented in v0.2.0. The legacy browser extension is not compatible with this rewrite yet.
 
-Visit **[GitHub Releases](https://github.com/kavianpcx/You-Want-Download/releases)**. When a CI-validated release is published it should offer:
+## Install
 
-| Windows x64 artifact | Use |
-| --- | --- |
-| `You-Want-Download-<version>-x64-Setup.exe` | Normal installer; supports in-app delta updates |
-| `You-Want-Download-<version>-Portable.exe` | Portable; manual app updates |
+Go to **[Releases](https://github.com/kavianpcx/You-Want-Download/releases)** and choose:
 
-> Release packages are currently unsigned. Windows SmartScreen may warn about unknown publishers. Review the source and the GitHub Actions build workflow before executing.
+| File | Behavior |
+|---|---|
+| `You-Want-Download-0.2.0-x64-Setup.exe` | Per-user installer, Start Menu shortcut and uninstall entry |
+| `You-Want-Download-0.2.0-Portable.exe` | Single executable; no installer required |
 
-## Run from source
+Windows 10/11 x64 and Microsoft WebView2 Runtime are required. The runtime is already installed on most modern Windows systems; Wails can offer Microsoft's bootstrapper if needed. Both executables use your Windows user profile for settings and download queue, so moving the portable exe does not move its history. The releases are **not code-signed**; Windows SmartScreen can warn.
 
-Requires Node.js 22 or later and npm:
+**Do not overwrite a currently running v0.1 installation with v0.2.** Close the previous application first. Because v0.2 changes desktop frameworks, installing v0.2 is a manual upgrade; the v0.1 differential updater is not compatible with v0.2.
+
+## How downloads work
+
+1. Click **New download** or press **Ctrl+N**.
+2. Paste a direct HTTP or HTTPS link, optionally select a name, folder and start time.
+3. Select **Connections per file** (1/2/4/8/16), then **Start download**.
+4. Select a row to see details, pause/resume, or reveal the finished file.
+5. Under **Settings**, choose the default number of connections and concurrent downloads.
+
+The downloader checks the server's `Content-Range`, file length and ETag/Last-Modified validator where available; stores segment data in `.ywd-<id>-<segment>.part`; verifies the resulting byte count; and assembles into a temporary file before moving it into place. It avoids overwriting a previously existing target. The size check is not the same as a publisher-provided cryptographic SHA-256 checksum.
+
+## Build from source
+
+Requires Go 1.23+ (CI uses Go 1.24), Node.js 22+, and [Wails v2](https://v2.wails.io/docs/gettingstarted/installation/). Windows builds require a C compiler and WebView2 development tooling available in the Wails build process. [NSIS](https://nsis.sourceforge.io/) builds the installer.
 
 ```sh
-npm install
-npm start
+# Download engine tests (no Wails runtime required)
+go test -race -count=1 ./internal/downloader
+
+# Validate the small dependency-free frontend
+cd frontend && npm install && npm run build && cd ..
+node --check frontend/dist/app.js
+
+# Windows portable executable (from Windows with Wails CLI installed)
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1
+wails build -platform windows/amd64 -webview2 embed -o You-Want-Download.exe
 ```
 
-Run dependency-free engine tests and JS syntax validation:
+For local menu/UI smoke tests, install Python Playwright and Chrome/Chromium, then run `python tests/ui_smoke.py`. This script tests navigation, settings, dialogs, connections-per-file, selection, queue actions and search with **sample data**, independently of the Go transfer engine. The Go tests start local HTTP servers and compare the **actual downloaded bytes** to their originals.
 
-```sh
-npm run check
-npm test
-```
+CI (`.github/workflows/release.yml`) runs Go race/correctness tests, checks frontend JavaScript and UI behavior, builds the Windows portable executable and installer, checks the artifacts and a maximum binary size budget, and publishes a new version **only if every job succeeds**. Windows packaging, GUI execution inside Windows, and updates across two releases still require field validation; passing unit tests alone cannot prove compatibility with every server or Windows configuration.
 
-Build Windows x64 packages on Windows:
+## Updates and size
 
-```sh
-npm run dist:win
-```
+Unlike the Electron 0.1 updater, this v0.2 rewrite **does not claim to install incremental patches**. Its Updates menu checks the latest version on GitHub and opens the release page for an authenticated-by-the-user manual download. A future signed and verified delta updater would need its own tests, rollback logic, and patch manifests. Full replacements are safer until that mechanism is complete.
 
-The GitHub Actions workflow runs tests before creating `.exe` packages, `latest.yml` and differential `.blockmap` artifacts. Versioned releases use the version in `package.json`. To publish a new release, increase that version and push to `main`; a matching tag is published only after the Windows build succeeds.
-
-## Connect your browser (optional)
-
-1. Install the normal Windows desktop app (this registers `ywd://`).
-2. Open Chrome or Edge's **Extensions → Manage Extensions**, enable **Developer mode**, and select **Load unpacked**.
-3. Select the `browser-extension/` folder. Right-click an HTTP(S) link and choose **Download with You Want Download**.
-
-The browser may show a confirmation dialog before opening the desktop application. This extension does not automatically intercept browser downloads or capture media streams. Portable builds do not guarantee protocol registration.
-
-## How updates work
-
-The **installed** edition checks GitHub Releases when you click **Check for updates**. On a newer version you can download it and restart to install. `electron-updater` compares NSIS `.blockmap` data and can request **only the changed byte ranges**. If changed-block reuse is impossible (for example because a blockmap is unavailable), it falls back to downloading the full update. Update success and byte savings must be validated across two signed-off Windows releases, not inferred from configuration alone.
-
-The **portable** edition offers a link to fetch the new portable executable manually. It does not silently replace itself or claim unsupported delta patching.
-
-## Reliability and privacy
-
-Downloads stream straight to `.ywd-*` temporary parts in the chosen folder. Segments are verified for the expected byte count, combined into a temporary file, checked against the server-reported total length, and then moved to the destination. Download state is written atomically to the app's local user-data folder. Completed files are never deleted by **Remove from list**.
-
-This is **not a cryptographic integrity check**: if the publisher provides a SHA-256 checksum, compare it separately. Some servers do not support reliable resume or may invalidate URLs. The app does not transmit download history or analytics to us; requests go to the URLs you provide and update checks go to GitHub.
-
-## Roadmap and known gaps
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidance. Near-term priorities: download correctness with hostile servers (unexpected gzip, broken ranges, mutable files); speed limits; named queues; proxies; localization including Persian RTL; native tray and notifications; comprehensive UI accessibility; automated Windows GUI smoke tests; checksum verification; optional torrent engine. Browser-wide download interception and media capture require a separate security and compatibility review.
+Download history is stored under your Windows user configuration folder (`YouWantDownload/downloads.json`); no account, ads or telemetry are required. Networking occurs only to user-supplied URLs and, when requested, the GitHub Releases API. Browser integration and additional protocols remain open-source roadmap items, not implemented features.
 
 ## License
 
-[MIT](LICENSE). Free for personal and commercial use. No affiliation with Internet Download Manager or Free Download Manager; their trademarks and proprietary code are not included.
+[MIT](LICENSE). Free for personal and commercial use. Not affiliated with IDM or FDM; no proprietary code or assets from either product are used.

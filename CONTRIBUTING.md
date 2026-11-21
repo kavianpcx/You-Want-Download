@@ -1,32 +1,28 @@
 # Contributing to You Want Download
 
-Thank you for helping build a safe, reliable open-source download manager.
+You Want Download is an open-source Windows download manager under the MIT License. Issues and pull requests are welcome.
 
-## Setup and tests
+## Architecture
 
-Use Node.js 22+, run `npm install`, then `npm run check && npm test`. Tests use a loopback HTTP fixture, so no public download service is needed. Run `npm start` to inspect the desktop interface. Windows releases are assembled in GitHub Actions using electron-builder and NSIS; the packaging output cannot be verified with Node-only tests.
+- `internal/downloader/engine.go`: standard-library-only Go HTTP(S) download engine, persistent queue, segmented transfers, retries and safe assembly.
+- `internal/downloader/engine_test.go`: deterministic local HTTP tests; no third-party service or live internet required.
+- `main.go`, `app.go`: Wails v2 desktop shell, Go/JS bridge and Windows integration.
+- `frontend/dist/`: compact dependency-free UI with consistent inline SVG icons, dialogs, filters and per-file connections.
+- `tests/ui_smoke.py`: Chromium-based UI interaction tests using sample jobs, never claimed as real transfers.
+- `.github/workflows/release.yml`: Linux Go race tests, Windows engine tests, Wails packaging and release gating.
 
-## Before requesting a feature
+## Before sending a PR
 
-Correctness comes before reported download speed. A server is allowed to ignore `Range`, change ETags, truncate responses, redirect, or terminate a connection. Every new downloader feature needs a fixture test covering data correctness and a safe failure path. Do not silently skip checksum/size checks or overwrite existing files.
+Run `go test -race -count=1 ./internal/downloader` and `node --check frontend/dist/app.js`; if you modify UI, run `python tests/ui_smoke.py` with Playwright/Chromium installed. Do not use `preview` sample downloads in production. For Windows changes, verify the Wails build and installer in Windows and confirm that a portable launch needs no installation.
 
-## Pull requests
+Please test resumability on byte-range servers, no-range fallback, redirects, changing validators, interrupted transfers, filename collisions and download history after app exit. Preserve user files; removing a task must never delete the completed file without a separate explicit action. Add test coverage when fixing a bug. Keep UI interactions keyboard-accessible and error messages understandable.
 
-- Keep the Electron renderer sandboxed and use explicit IPC channels in `app/preload.cjs`.
-- Never put unsanitized filenames or URLs into HTML markup.
-- Avoid adding telemetry, advertising, paid features or bypasses for DRM.
-- Add a test for fixes to pause/resume, retries, or file assembly.
-- Describe Windows smoke-test results separately from Linux/Node tests.
-- Use semantic versioning for releases and note upgrade compatibility.
+## Roadmap
 
-## Planned work
+- Windows GUI automation on a Windows runner, live installer/uninstaller and Windows 10 compatibility tests.
+- Verified and signed differential updater with rollback, safe patch manifests, and repeated release-to-release tests.
+- Global speed limits, richer queues, proxy settings, drag/drop, tray controls, multi-language UI including Persian RTL.
+- Browser extension protocol registration and interception with explicit permissions and security review.
+- Torrent, media handling and file checksum verification as separate audited features.
 
-1. Windows install/launch and update tests against real signed release pairs.
-2. Stronger resume validators and optional SHA-256 verification.
-3. Named queues and independent queue policies, host-aware throttling and speed caps.
-4. Browser extension interoperability, accessibility, Persian localization and RTL layout.
-5. Optional dedicated torrent component with a reviewed dependency and clear licensing.
-
-## Licensing
-
-By contributing, you agree to license your contribution under the repository's MIT license. Do not copy IDM or FDM proprietary code or assets.
+Please don't advertise unimplemented features as working. Package sizes and download speeds should be measured and reported instead of guessed.
