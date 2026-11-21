@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: write
-  actions: write
 
 jobs:
   unpack:
@@ -22,8 +21,9 @@ jobs:
           test -f package.json
           test -f app/engine.cjs
           test -f .github/workflows/release.yml
-          rm -f snapshot.b64 .github/workflows/bootstrap.yml
-      - name: Commit original source files
+          # GitHub Actions tokens cannot modify workflow files: publish this separately.
+          rm -f .github/workflows/release.yml snapshot.b64
+      - name: Commit source files
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
@@ -31,13 +31,3 @@ jobs:
           git add -A
           git commit -m "feat: initialize You Want Download desktop app"
           git push origin main
-      - name: Run Windows release workflow after source push
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          for attempt in 1 2 3 4 5 6; do
-            if gh workflow run release.yml --ref main; then exit 0; fi
-            sleep 10
-          done
-          exit 1
