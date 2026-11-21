@@ -1,0 +1,99 @@
+name: Test, package and release Windows
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**/*.md', 'assets/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Test download engine (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npm run check
+      - run: npm test
+
+  windows:
+    name: Test and build installer + portable (Windows x64)
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npm run check
+      - run: npm test
+      - run: npm run dist:win -- --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Verify release payloads
+        shell: pwsh
+        run: |
+          $installer = @(Get-ChildItem release -Filter '*Setup.exe')
+          $portable  = @(Get-ChildItem release -Filter '*Portable.exe')
+          $manifest  = @(Get-ChildItem release -Filter 'latest.yml')
+          if ($installer.Count -lt 1 -or $portable.Count -lt 1 -or $manifest.Count -lt 1) { throw 'Missing installer, portable executable or auto-update manifest' }
+          Write-Host "Installer: $($installer[0].Name)"
+          Write-Host "Portable: $($portable[0].Name)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: you-want-download-windows-x64
+          path: |
+            release/*.exe
+            release/*.blockmap
+            release/latest.yml
+          if-no-files-found: error
+
+  release:
+    name: Publish versioned release (if new)
+    needs: windows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set version and check existing tag
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          VERSION=$(node -p 'require("./package.json").version')
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            echo 'exists=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'exists=false' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/download-artifact@v4
+        if: steps.version.outputs.exists == 'false'
+        with:
+          name: you-want-download-windows-x64
+          path: release
+      - uses: softprops/action-gh-release@v2
+        if: steps.version.outputs.exists == 'false'
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: You Want Download ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            Early preview release. Windows binaries are not code signed.
+            Download correctness tests passed on Linux and Windows before packaging.
+            The installed edition is configured for differential NSIS updates; the portable edition updates manually.
+            This version does not yet match every IDM/FDM feature.
+          files: |
+            release/*.exe
+            release/*.blockmap
+            release/latest.yml
+          fail_on_unmatched_files: true
