@@ -29,8 +29,16 @@ var invalidName = regexp.MustCompile(`[<>:"/\\|?*\x00-\x1f]`)
 var deviceName = regexp.MustCompile(`(?i)^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?$`)
 
 type Settings struct {
-	Concurrency int `json:"concurrency"`
-	Segments    int `json:"segments"`
+	Concurrency       int      `json:"concurrency"`
+	Segments          int      `json:"segments"`
+	DownloadDirectory string   `json:"downloadDirectory"`
+	ProgramsDirectory string   `json:"programsDirectory"`
+	SeparatePrograms  bool     `json:"separatePrograms"`
+	NetworkMode       string   `json:"networkMode"` // system or combine
+	Interfaces        []string `json:"interfaces"`  // stable adapter names
+	ProxyURL          string   `json:"proxyUrl"`
+	Retries           int      `json:"retries"`
+	AutoPaste         bool     `json:"autoPaste"`
 }
 type Part struct {
 	Start int64 `json:"start"`
@@ -77,23 +85,13 @@ type Engine struct {
 	wg          sync.WaitGroup
 	onChange    func()
 	lastEvent   atomic.Int64
-	client      *http.Client
 	closed      bool
 }
 
 func New(stateFile, downloadDir string) *Engine {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.DisableCompression = true
-	transport.MaxIdleConnsPerHost = 20
-	transport.ResponseHeaderTimeout = 25 * time.Second
-	return &Engine{stateFile: stateFile, downloadDir: downloadDir, settings: Settings{Concurrency: 3, Segments: 4},
-		active: map[string]context.CancelFunc{}, signal: make(chan struct{}, 1), done: make(chan struct{}),
-		client: &http.Client{Transport: transport, CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 8 || (req.URL.Scheme != "http" && req.URL.Scheme != "https") {
-				return errors.New("unsafe or excessive HTTP redirect")
-			}
-			return nil
-		}},
+	return &Engine{stateFile: stateFile, downloadDir: downloadDir,
+		settings: Settings{Concurrency: 3, Segments: 4, DownloadDirectory: downloadDir, NetworkMode: "system", Retries: 2, AutoPaste: true},
+		active:   map[string]context.CancelFunc{}, signal: make(chan struct{}, 1), done: make(chan struct{}),
 	}
 }
 func (e *Engine) SetOnChange(fn func()) { e.mu.Lock(); e.onChange = fn; e.mu.Unlock() }
@@ -135,6 +133,17 @@ func (e *Engine) Init() error {
 		if stored.Settings.Segments >= 1 && stored.Settings.Segments <= MaxConnections {
 			e.settings.Segments = stored.Settings.Segments
 		}
+		// v0.2 settings contained only concurrency and segments.
+		if stored.Settings.DownloadDirectory != "" {
+			e.settings.DownloadDirectory = stored.Settings.DownloadDirectory
+			e.settings.ProgramsDirectory = stored.Settings.ProgramsDirectory
+			e.settings.SeparatePrograms = stored.Settings.SeparatePrograms
+			e.settings.NetworkMode = stored.Settings.NetworkMode
+			e.settings.Interfaces = append([]string(nil), stored.Settings.Interfaces...)
+			e.settings.ProxyURL = stored.Settings.ProxyURL
+			e.settings.Retries = stored.Settings.Retries
+			e.settings.AutoPaste = stored.Settings.AutoPaste
+		}
 		for _, j := range stored.Items {
 			if j == nil {
 				continue
@@ -171,6 +180,7 @@ func (e *Engine) loop() {
 }
 func (e *Engine) snapshotLocked() Snapshot {
 	s := Snapshot{Items: make([]*Job, 0, len(e.jobs)), Settings: e.settings}
+	s.Settings.Interfaces = append([]string(nil), e.settings.Interfaces...)
 	for _, j := range e.jobs {
 		cp := *j
 		if j.Total != nil {
@@ -279,9 +289,15 @@ func (e *Engine) Add(arg AddRequest) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	e.mu.Lock()
+	settings := e.settings
+	e.mu.Unlock()
 	dir := arg.Directory
 	if dir == "" {
-		dir = e.downloadDir
+		dir = settings.DownloadDirectory
+		if settings.SeparatePrograms && isInstaller(arg.FileName, link) && settings.ProgramsDirectory != "" {
+			dir = settings.ProgramsDirectory
+		}
 	}
 	dir, err = filepath.Abs(dir)
 	if err != nil {
@@ -403,10 +419,56 @@ func (e *Engine) Remove(id string) error {
 	e.kick()
 	return nil
 }
-func (e *Engine) UpdateSettings(s Settings) error {
-	if s.Concurrency < 1 || s.Concurrency > 8 || s.Segments < 1 || s.Segments > MaxConnections {
-		return errors.New("simultaneous downloads: 1–8; connections per file: 1–16")
+func isInstaller(name, link string) bool {
+	if strings.TrimSpace(name) == "" {
+		name = nameFromURL(link)
 	}
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".exe", ".msi", ".msix", ".msixbundle", ".appx", ".appxbundle":
+		return true
+	}
+	return false
+}
+
+func (e *Engine) UpdateSettings(s Settings) error {
+	// Accept settings written by the original v0.2 API (two fields only).
+	if s.DownloadDirectory == "" && s.NetworkMode == "" {
+		e.mu.Lock()
+		old := e.settings
+		e.mu.Unlock()
+		old.Concurrency, old.Segments = s.Concurrency, s.Segments
+		s = old
+	}
+	if s.Concurrency < 1 || s.Concurrency > 8 || s.Segments < 1 || s.Segments > MaxConnections || s.Retries < 0 || s.Retries > 5 {
+		return errors.New("simultaneous downloads 1–8, connections per file 1–16, retries 0–5")
+	}
+	if s.NetworkMode != "system" && s.NetworkMode != "combine" {
+		return errors.New("unknown network mode")
+	}
+	if len(s.Interfaces) > 8 {
+		return errors.New("select no more than 8 network adapters")
+	}
+	if s.ProxyURL != "" {
+		p, err := url.Parse(s.ProxyURL)
+		if err != nil || p.Host == "" || p.User != nil || (p.Scheme != "http" && p.Scheme != "https" && p.Scheme != "socks5") {
+			return errors.New("proxy must be an HTTP, HTTPS or SOCKS5 URL without credentials")
+		}
+	}
+	if strings.TrimSpace(s.DownloadDirectory) == "" {
+		return errors.New("choose a default download folder")
+	}
+	for _, d := range []string{s.DownloadDirectory, s.ProgramsDirectory} {
+		if d != "" {
+			path, err := filepath.Abs(d)
+			if err != nil {
+				return err
+			}
+			if err := os.MkdirAll(path, 0755); err != nil {
+				return err
+			}
+		}
+	}
+	s.Interfaces = append([]string(nil), s.Interfaces...)
 	e.mu.Lock()
 	e.settings = s
 	e.mu.Unlock()
@@ -509,19 +571,19 @@ func (e *Engine) execute(ctx context.Context, j *Job) {
 	e.broadcast()
 	e.kick()
 }
-func (e *Engine) clientRequest(ctx context.Context, method, raw string, headers http.Header) (*http.Response, error) {
+func (e *Engine) clientRequest(ctx context.Context, client *http.Client, method, raw string, headers http.Header) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, raw, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "YouWantDownload/0.2")
+	req.Header.Set("User-Agent", "YouWantDownload/0.3")
 	req.Header.Set("Accept-Encoding", "identity")
 	for k, values := range headers {
 		for _, v := range values {
 			req.Header.Add(k, v)
 		}
 	}
-	return e.client.Do(req)
+	return client.Do(req)
 }
 func parseContentRange(s string) (int64, int64, int64, bool) {
 	m := rangePattern.FindStringSubmatch(s)
@@ -533,10 +595,10 @@ func parseContentRange(s string) (int64, int64, int64, bool) {
 	total, er3 := strconv.ParseInt(m[3], 10, 64)
 	return a, b, total, er1 == nil && er2 == nil && er3 == nil && a <= b && b < total
 }
-func (e *Engine) probe(ctx context.Context, raw string) (size *int64, ranges bool, validator string, err error) {
+func (e *Engine) probe(ctx context.Context, client *http.Client, raw string) (size *int64, ranges bool, validator string, err error) {
 	h := http.Header{}
 	h.Set("Range", "bytes=0-0")
-	res, err := e.clientRequest(ctx, http.MethodGet, raw, h)
+	res, err := e.clientRequest(ctx, client, http.MethodGet, raw, h)
 	if err != nil {
 		return nil, false, "", err
 	}
@@ -565,10 +627,90 @@ func (e *Engine) probe(ctx context.Context, raw string) (size *int64, ranges boo
 	return nil, false, validator, nil
 }
 func (e *Engine) download(ctx context.Context, j *Job) error {
-	size, ranges, validator, err := e.probe(ctx, j.URL)
+	e.mu.Lock()
+	settings := e.settings
+	settings.Interfaces = append([]string(nil), e.settings.Interfaces...)
+	e.mu.Unlock()
+	routes, clean, err := e.clientsFor(settings)
 	if err != nil {
 		return err
 	}
+	defer clean()
+	var size *int64
+	var ranges bool
+	var validator string
+	// Probe adapters in parallel; an offline hotspot should not stall a working link.
+	type probeResult struct {
+		client    *http.Client
+		size      *int64
+		ranges    bool
+		validator string
+		err       error
+	}
+	probes := make(chan probeResult, len(routes))
+	for _, route := range routes {
+		go func(client *http.Client) {
+			probeCtx, stop := context.WithTimeout(ctx, 15*time.Second)
+			defer stop()
+			n, r, v, probeErr := e.probe(probeCtx, client, j.URL)
+			probes <- probeResult{client, n, r, v, probeErr}
+		}(route)
+	}
+	good := make([]*http.Client, 0, len(routes))
+	var firstProbeErr error
+	for range routes {
+		result := <-probes
+		if result.err != nil {
+			if firstProbeErr == nil {
+				firstProbeErr = result.err
+			}
+			continue
+		}
+		if len(good) == 0 {
+			size, ranges, validator = result.size, result.ranges, result.validator
+		} else if (size == nil) != (result.size == nil) || size != nil && *size != *result.size || ranges != result.ranges || validator != result.validator {
+			continue // Do not combine different objects returned by CDNs or proxies.
+		}
+		good = append(good, result.client)
+	}
+	if len(good) == 0 {
+		if firstProbeErr != nil {
+			return firstProbeErr
+		}
+		return errors.New("download server unreachable through selected network adapters")
+	}
+	if validator == "" && len(good) > 1 {
+		// Without ETag or Last-Modified it is unsafe to concatenate copies
+		// served by different Internet egress IPs / CDN backends.
+		good = good[:1]
+	}
+	routes = good
+	// Sample aggregate bytes across all segments, not the last worker's speed.
+	samplerDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+		e.mu.Lock()
+		previous := j.Downloaded
+		e.mu.Unlock()
+		for {
+			select {
+			case <-samplerDone:
+				return
+			case <-ticker.C:
+				e.mu.Lock()
+				delta := j.Downloaded - previous
+				if delta < 0 {
+					delta = 0
+				}
+				j.Speed = delta * 2
+				previous = j.Downloaded
+				e.mu.Unlock()
+				e.progressEvent()
+			}
+		}
+	}()
+	defer close(samplerDone)
 	e.mu.Lock()
 	if (j.Total != nil && size != nil && *j.Total != *size) || (j.Validator != "" && j.Validator != validator) {
 		e.mu.Unlock()
@@ -641,7 +783,7 @@ func (e *Engine) download(ctx context.Context, j *Job) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := e.fetchPart(ctx, j, i, p, sizes[i], ranges); err != nil {
+			if err := e.fetchPart(ctx, j, i, p, sizes[i], ranges, routes, settings.Retries); err != nil {
 				cancel()
 				errch <- err
 			}
@@ -668,9 +810,9 @@ func (e *Engine) download(ctx context.Context, j *Job) error {
 func (e *Engine) partPath(j *Job, i int) string {
 	return filepath.Join(j.Directory, fmt.Sprintf(".ywd-%s-%d.part", j.ID, i))
 }
-func (e *Engine) fetchPart(ctx context.Context, j *Job, i int, p Part, existing int64, ranges bool) error {
+func (e *Engine) fetchPart(ctx context.Context, j *Job, i int, p Part, existing int64, ranges bool, clients []*http.Client, retries int) error {
 	dest := e.partPath(j, i)
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; attempt <= retries; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -683,14 +825,14 @@ func (e *Engine) fetchPart(ctx context.Context, j *Job, i int, p Part, existing 
 			e.mu.Unlock()
 			existing = 0
 		}
-		err := e.fetchOnce(ctx, j, dest, p, existing, ranges)
+		err := e.fetchOnce(ctx, clients[(i+attempt)%len(clients)], j, dest, p, existing, ranges)
 		if err == nil {
 			return nil
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if attempt == 2 {
+		if attempt == retries {
 			return err
 		}
 		info, statErr := os.Stat(dest)
@@ -705,7 +847,7 @@ func (e *Engine) fetchPart(ctx context.Context, j *Job, i int, p Part, existing 
 	}
 	return errors.New("exhausted retries")
 }
-func (e *Engine) fetchOnce(ctx context.Context, j *Job, dest string, p Part, existing int64, ranges bool) error {
+func (e *Engine) fetchOnce(ctx context.Context, client *http.Client, j *Job, dest string, p Part, existing int64, ranges bool) error {
 	h := http.Header{}
 	start := p.Start + existing
 	useRange := ranges && p.End >= 0
@@ -718,7 +860,7 @@ func (e *Engine) fetchOnce(ctx context.Context, j *Job, dest string, p Part, exi
 	if p.End >= p.Start && existing == p.End-p.Start+1 {
 		return nil
 	}
-	res, err := e.clientRequest(ctx, http.MethodGet, j.URL, h)
+	res, err := e.clientRequest(ctx, client, http.MethodGet, j.URL, h)
 	if err != nil {
 		return err
 	}
@@ -750,8 +892,6 @@ func (e *Engine) fetchOnce(ctx context.Context, j *Job, dest string, p Part, exi
 		return err
 	}
 	buffer := make([]byte, 64*1024)
-	last := time.Now()
-	lastBytes := int64(0)
 	for {
 		n, readErr := res.Body.Read(buffer)
 		if n > 0 {
@@ -766,13 +906,6 @@ func (e *Engine) fetchOnce(ctx context.Context, j *Job, dest string, p Part, exi
 			}
 			e.mu.Lock()
 			j.Downloaded += int64(written)
-			elapsed := time.Since(last)
-			lastBytes += int64(written)
-			if elapsed > 500*time.Millisecond {
-				j.Speed = int64(float64(lastBytes) / elapsed.Seconds())
-				last = time.Now()
-				lastBytes = 0
-			}
 			e.mu.Unlock()
 			e.progressEvent()
 		}

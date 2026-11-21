@@ -2,83 +2,96 @@
 
 # You Want Download
 
-**A compact, free, MIT-licensed Windows download manager.**
+**A compact, free, open-source download manager for Windows.**
 
-Parallel HTTP(S) downloads · Queue · Pause/resume · Per-file connections · Portable and installer
+Parallel HTTP/HTTPS · Resume · FIFO queue · Clipboard Add URL · Multiple network adapters · Installer and portable
 
-[Download releases](https://github.com/kavianpcx/You-Want-Download/releases) · [Report a bug](https://github.com/kavianpcx/You-Want-Download/issues) · [Contribute](CONTRIBUTING.md)
+[**Download for Windows**](https://github.com/kavianpcx/You-Want-Download/releases/latest) · [Report a problem](https://github.com/kavianpcx/You-Want-Download/issues) · [MIT License](LICENSE)
 
 </div>
 
-![Compact You Want Download v0.2 desktop interface showing the download list, progress, connections, and file details](assets/app-preview-v0.2.webp)
+![You Want Download v0.3.0 compact desktop interface: download table, real menus, progress bars, and connections](assets/app-preview-v0.3.webp)
 
-*Screenshot from the actual HTML/CSS interface in Chromium with **clearly labeled sample downloads**. It is a UI preview, not an assertion that these transfers occurred or that the Windows executable was exercised on this Linux environment.*
+*Screenshot of the actual shipped HTML/CSS interface exercised in Chromium with **sample transfers**, not an image of a live download or a screenshot of the Windows frame. The Windows app uses the **standard OS title bar** with the window icon and minimize, maximize, and close buttons.*
 
-## What's new in v0.2.0
+## Download / install
 
-The old v0.1 Electron dashboard was replaced with **Go + Wails/WebView2** to produce a much smaller standalone Windows executable. Instead of a hero banner, large statistic cards, and tiny action icons, the app uses a focused download table, a consistent icon system, a small toolbar, explicit settings, and a details pane.
+| Windows 10 / 11 x64 | File |
+| --- | --- |
+| Installer, user-selectable installation folder, Start Menu and uninstall entry | `You-Want-Download-0.3.0-x64-Setup.exe` |
+| Standalone portable program, no installation | `You-Want-Download-0.3.0-Portable.exe` |
 
-- **Choose 1, 2, 4, 8, or 16 connections** for each new HTTP(S) download, with a separate **default** in Settings. The engine automatically limits segmentation when the file is small or the server doesn't support verified byte ranges. This is **not a guarantee of a speed increase**.
-- **Pause, resume, queue, schedule:** streaming to safe temporary segment files, preserving disk progress through an app restart. If a server doesn't support byte ranges, a partial transfer restarts safely from zero.
-- **Concurrent files:** choose 1–8 simultaneous downloads; older queued tasks start first.
-- **Details and actions:** file size, bytes written, progress, transfer rate, connection count, URL, destination; change connections on jobs that haven't started; open completed downloads in Explorer; remove a task without deleting the final file.
-- **Search and filters:** all, downloading, queued/paused, completed and failed.
-- **Simpler Windows distribution:** portable `.exe` and per-user NSIS installer. Uses the Windows WebView2 Runtime instead of bundling an entire Chromium browser. On a machine without WebView2 the application offers the Microsoft bootstrapper.
-- **Older-download migration:** best-effort import of the previous Electron `downloads.json` from its Windows roaming application-data folder, keeping original download files untouched.
-- **Updates:** a manual GitHub Releases version check from within the app.
+Get these from [GitHub Releases](https://github.com/kavianpcx/You-Want-Download/releases). Microsoft **WebView2** is required; most current Windows systems have it. Binaries are **not digitally signed**, so Windows SmartScreen may show a warning. No accounts, advertising or telemetry.
 
-> **No feature-parity claim with Internet Download Manager (IDM) or Free Download Manager (FDM).** HTTP/HTTPS and reliable transfers are the implemented scope. Torrent/magnet links, browser-wide interception, video-site capture, proxy profiles, speed limits, individually named recurring queues, and automatic *differential* patch updates are **not** implemented in v0.2.0. The legacy browser extension is not compatible with this rewrite yet.
+**Updating from v0.2:** quit the older app, then install v0.3. Your saved downloads and user data stay in the same Windows profile location. The in-app **Updates** menu checks GitHub Releases and opens the release page. **Automatic differential patch installation is not implemented yet.**
 
-## Install
+## The simple workflow
 
-Go to **[Releases](https://github.com/kavianpcx/You-Want-Download/releases)** and choose:
+1. **Copy** a direct `https://...` or `http://...` file URL.
+2. Open You Want Download, click **Add URL** (`Ctrl+N`). The URL is **prefilled from the clipboard**, if valid and enabled in Settings.
+3. Click **Start download**. The app chooses the filename, destination folder, and connection count from your saved settings automatically.
+4. **Advanced options** is optional: change file name, destination, start time, or number of connections for this one file.
 
-| File | Behavior |
-|---|---|
-| `You-Want-Download-0.2.0-x64-Setup.exe` | Per-user installer, Start Menu shortcut and uninstall entry |
-| `You-Want-Download-0.2.0-Portable.exe` | Single executable; no installer required |
+There is no continuous background clipboard watcher. The clipboard is read only when Add URL opens (or when you explicitly use **Tasks → Add from clipboard**, `Ctrl+Shift+V`). The app rejects clipboard content that is not a valid HTTP(S) URL. Only HTTP and HTTPS downloads are supported.
 
-Windows 10/11 x64 and Microsoft WebView2 Runtime are required. The runtime is already installed on most modern Windows systems; Wails can offer Microsoft's bootstrapper if needed. Both executables use your Windows user profile for settings and download queue, so moving the portable exe does not move its history. The releases are **not code-signed**; Windows SmartScreen can warn.
+## v0.3 options, inspired by the useful parts of IDM
 
-**Do not overwrite a currently running v0.1 installation with v0.2.** Close the previous application first. Because v0.2 changes desktop frameworks, installing v0.2 is a manual upgrade; the v0.1 differential updater is not compatible with v0.2.
+The native Windows caption, app icon, system menu, window dragging, resizing, minimize/maximize and close controls are provided by Wails/WebView2. The compact in-app menu bar has working **Tasks / Downloads / View / Tools / Help** menus.
 
-## How downloads work
+Under **Tools → Options / Settings**:
 
-1. Click **New download** or press **Ctrl+N**.
-2. Paste a direct HTTP or HTTPS link, optionally select a name, folder and start time.
-3. Select **Connections per file** (1/2/4/8/16), then **Start download**.
-4. Select a row to see details, pause/resume, or reveal the finished file.
-5. Under **Settings**, choose the default number of connections and concurrent downloads.
+| Tab | Options and behavior |
+| --- | --- |
+| **General** | Auto-fill the Add URL box from clipboard on opening. |
+| **Connection** | Save **1, 2, 4, 8 or 16 default connections per file**, choose **System default** or **Combine adapters**, and select available IPv4 network adapters. |
+| **Save To** | Default download folder; optionally store downloaded software installers (`.exe`, `.msi`, `.msix`, `.appx`) in their own directory. Does **not** silently install software or change Windows' installed-program paths. |
+| **Downloads** | 1–8 concurrent downloads; 0–5 retries for each failed segment. FIFO queue. |
+| **Proxy / SOCKS** | Optional `http://`, `https://`, or `socks5://` proxy URL without credentials. Empty means use proxy environment settings. |
 
-The downloader checks the server's `Content-Range`, file length and ETag/Last-Modified validator where available; stores segment data in `.ywd-<id>-<segment>.part`; verifies the resulting byte count; and assembles into a temporary file before moving it into place. It avoids overwriting a previously existing target. The size check is not the same as a publisher-provided cryptographic SHA-256 checksum.
+Settings are **persisted** in `downloads.json` and are used by all **new** downloads. Existing files keep the connection count they started with, preventing corrupted partial downloads. Individual tasks can override the default **before** downloading starts.
 
-## Build from source
+IDM has additional features (site logins, FTP, browser capture, video integration, category rules, sounds, advanced queue scheduler) that are **not present here**. This is independent MIT-licensed software, not IDM code or a visual copy.
 
-Requires Go 1.23+ (CI uses Go 1.24), Node.js 22+, and [Wails v2](https://v2.wails.io/docs/gettingstarted/installation/). Windows builds require a C compiler and WebView2 development tooling available in the Wails build process. [NSIS](https://nsis.sourceforge.io/) builds the installer.
+## Two Internet connections: how it works and its limits
 
-```sh
-# Download engine tests (no Wails runtime required)
+For one file, set **Settings → Connection → Combine adapters**, tick two physical adapters (for example **Wi-Fi + USB tethering** or **Wi-Fi + Ethernet**), and save. If you select none, all eligible active IPv4 adapters are considered. Each piece of a large HTTP(S) download is fetched over its own TCP connection, *explicitly pinned to its Windows network adapter*, with `IP_UNICAST_IF` and the adapter's local IPv4 address. Requests are assigned round-robin, and failed transfers can retry on another route. The downloaded bytes are checked and assembled in order. The application does **not** change Windows' system-wide routes or require administrative permissions.
+
+This is **connection-level load spreading**, not true packet-level bonding: a single TCP transfer cannot use two links at once. The destination server must support HTTP byte ranges for multiple segments, both adapters must actually have working Internet access, Windows must allow simultaneous connections, and the remote file must have consistent metadata (ETag or Last-Modified) across routes to mix their data safely. If its metadata cannot be verified, the downloader uses one viable route for safety. The active interface list can include virtual adapters and VPNs; select known Internet uplinks. Some servers throttle per user, block multiple IPs, disallow ranges, or supply different content to different networks. **There is no promise of 2× speed.** Real two-ISP performance must be measured with both links connected on a Windows computer.
+
+The network-routing approach was researched against the open-source projects [ADM](https://github.com/StrStark/advance-download-manager) (Go per-link dial control) and [DualBond](https://github.com/bhutano/DualBond) (Windows socket `IP_UNICAST_IF`). No source files from those projects were copied. This implementation is independently written and licensed under MIT.
+
+## Download safety and reliability
+
+- Up to 16 HTTP byte-range parts per file, automatically scaled down for small files and non-range servers.
+- Pause/resume, restart recovery, scheduled start (per download), download queue and search/filters.
+- Partial `.part` files are never exposed as finished downloads. Assembly uses a temporary destination, syncs, and then renames without overwriting an existing target.
+- Validates HTTP status, `Content-Range` and length; checks ETag/Last-Modified when present, and refuses to mix incompatible responses across adapters.
+- Does not execute downloaded programs or change Windows installation paths.
+- **Not** a content antivirus or cryptographic checksum verifier; verify important downloads with a publisher's SHA-256 when provided.
+
+## Build and test
+
+Stack: Go 1.23+ (CI runs Go 1.24), Wails v2, Microsoft WebView2, static JavaScript/CSS UI with no frontend runtime dependencies, NSIS installer. The Windows shell replaces the much larger Electron-based v0.1 and keeps v0.2's compact architecture.
+
+```bash
+# Actual HTTP server / filesystem / route integration and data-corruption tests:
 go test -race -count=1 ./internal/downloader
 
-# Validate the small dependency-free frontend
-cd frontend && npm install && npm run build && cd ..
+# Static UI syntax and Chromium click-through (requires playwright + Chromium):
 node --check frontend/dist/app.js
+python tests/ui_smoke.py
 
-# Windows portable executable (from Windows with Wails CLI installed)
+# Windows-only: after installing Wails CLI and dependencies:
 go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1
 wails build -platform windows/amd64 -webview2 embed -o You-Want-Download.exe
 ```
 
-For local menu/UI smoke tests, install Python Playwright and Chrome/Chromium, then run `python tests/ui_smoke.py`. This script tests navigation, settings, dialogs, connections-per-file, selection, queue actions and search with **sample data**, independently of the Go transfer engine. The Go tests start local HTTP servers and compare the **actual downloaded bytes** to their originals.
+[GitHub Actions](.github/workflows/release.yml) gates the release on Go Linux race tests, tests on Windows, browser UI interaction tests, Windows binary packaging, and maximum portable size. The UI test exercises navigation, all five top menus, clipboard prefill, a simple Add URL dialog, settings tabs, adapter selection, saving settings, and download actions against a **mocked OS bridge**. The download engine is separately tested with **real HTTP test servers**, including two independent routed HTTP clients and a retry simulation. Neither test invents a measured live dual-ISP acceleration result. A Windows GUI startup/native-caption smoke check runs when the CI runner has an interactive desktop; verify the installer and adapter speeds on real Windows hardware too.
 
-CI (`.github/workflows/release.yml`) runs Go race/correctness tests, checks frontend JavaScript and UI behavior, builds the Windows portable executable and installer, checks the artifacts and a maximum binary size budget, and publishes a new version **only if every job succeeds**. Windows packaging, GUI execution inside Windows, and updates across two releases still require field validation; passing unit tests alone cannot prove compatibility with every server or Windows configuration.
+## What this version does not claim
 
-## Updates and size
-
-Unlike the Electron 0.1 updater, this v0.2 rewrite **does not claim to install incremental patches**. Its Updates menu checks the latest version on GitHub and opens the release page for an authenticated-by-the-user manual download. A future signed and verified delta updater would need its own tests, rollback logic, and patch manifests. Full replacements are safer until that mechanism is complete.
-
-Download history is stored under your Windows user configuration folder (`YouWantDownload/downloads.json`); no account, ads or telemetry are required. Networking occurs only to user-supplied URLs and, when requested, the GitHub Releases API. Browser integration and additional protocols remain open-source roadmap items, not implemented features.
+Automatic in-place/differential patch updates, BitTorrent/magnets, browser-wide interception, adaptive video capture, SOCKS credentials, Windows startup integration, and full IDM/FDM feature parity are not available. Please [open an issue](https://github.com/kavianpcx/You-Want-Download/issues) for requests or bugs. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-[MIT](LICENSE). Free for personal and commercial use. Not affiliated with IDM or FDM; no proprietary code or assets from either product are used.
+[MIT](LICENSE) — free to use, share and improve. Not affiliated with Internet Download Manager or Free Download Manager.

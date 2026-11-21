@@ -1,6 +1,6 @@
 !include "MUI2.nsh"
 !ifndef APP_VERSION
-  !define APP_VERSION "0.2.0"
+  !define APP_VERSION "0.3.0"
 !endif
 Name "You Want Download ${APP_VERSION}"
 OutFile "..\..\release\You-Want-Download-${APP_VERSION}-x64-Setup.exe"

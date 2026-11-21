@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-const Version = "0.2.0"
+const Version = "0.3.0"
 const ReleasesURL = "https://github.com/kavianpcx/You-Want-Download/releases"
 
 type App struct {
@@ -98,7 +98,52 @@ func (a *App) UpdateSettings(s downloader.Settings) error { return a.engine.Upda
 func (a *App) ChooseDirectory() (string, error) {
 	return wailsruntime.OpenDirectoryDialog(a.ctx, wailsruntime.OpenDialogOptions{Title: "Choose download folder"})
 }
-func (a *App) Clipboard() (string, error) { return wailsruntime.ClipboardGetText(a.ctx) }
+func (a *App) Clipboard() (string, error)                  { return wailsruntime.ClipboardGetText(a.ctx) }
+func (a *App) NetworkInterfaces() []downloader.NetworkLink { return downloader.AvailableLinks() }
+func (a *App) OpenDownloadDirectory() error {
+	dir := a.engine.Snapshot().Settings.DownloadDirectory
+	if dir == "" {
+		return errors.New("set a download folder in Settings")
+	}
+	if runtime.GOOS == "windows" {
+		return exec.Command("explorer.exe", dir).Start()
+	}
+	if runtime.GOOS == "darwin" {
+		return exec.Command("open", dir).Start()
+	}
+	return exec.Command("xdg-open", dir).Start()
+}
+func (a *App) PauseAll() error {
+	for _, j := range a.engine.Snapshot().Items {
+		if j.Status == "downloading" || j.Status == "queued" {
+			if err := a.engine.Pause(j.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+func (a *App) ResumeAll() error {
+	for _, j := range a.engine.Snapshot().Items {
+		if j.Status == "paused" {
+			if err := a.engine.Resume(j.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+func (a *App) ClearCompleted() error {
+	for _, j := range a.engine.Snapshot().Items {
+		if j.Status == "completed" {
+			if err := a.engine.Remove(j.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (a *App) ShowFile(id string) error {
 	j, err := a.engine.Get(id)
 	if err != nil {
@@ -141,7 +186,7 @@ func (a *App) CheckUpdate() UpdateInfo {
 		return UpdateInfo{Status: "error", Message: err.Error(), URL: ReleasesURL}
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "You-Want-Download/0.2")
+	req.Header.Set("User-Agent", "You-Want-Download/0.3")
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return UpdateInfo{Status: "error", Message: err.Error(), URL: ReleasesURL}

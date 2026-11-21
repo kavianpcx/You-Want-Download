@@ -8,21 +8,31 @@ permissions:
   contents: write
 jobs:
   engine:
-    name: Test Go download engine (Linux)
+    name: Test Go downloader and interactive menus (Linux)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24.x'
-      - name: Engine correctness and race tests
+      - name: Verify downloader, byte integrity, routing, race safety, folder settings
         run: go test -race -count=1 ./internal/downloader
-      - name: Format check
+      - name: Go format check
         shell: bash
         run: |
           test -z "$(gofmt -l internal/downloader/*.go app.go main.go)"
-      - name: Check frontend JavaScript
+      - name: JavaScript syntax check
         run: node --check frontend/dist/app.js
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Chromium and Playwright for UI interactions
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check playwright==1.55.0
+          python -m playwright install --with-deps chromium
+      - name: Exercise menus, clipboard prefill, settings tabs, queue controls, and shortcuts
+        run: python tests/ui_smoke.py
   windows:
     name: Build and verify Windows Setup + Portable
     needs: engine
@@ -35,21 +45,47 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Test engine on Windows
+      - name: Run downloader tests on Windows
         run: go test -count=1 ./internal/downloader
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.1
-      - name: Build compact Windows executable
+      - name: Build native-frame Windows executable
         shell: pwsh
         run: |
           wails build -platform windows/amd64 -webview2 embed -o You-Want-Download.exe
-          if (-not (Test-Path 'build/bin/You-Want-Download.exe')) { throw 'Wails executable missing' }
+          if ($LASTEXITCODE -ne 0) { throw 'Wails build failed' }
+          if (-not (Test-Path 'build/bin/You-Want-Download.exe')) { throw 'Executable missing' }
+          if (-not (Test-Path 'build/windows/icon.ico')) { throw 'Native window icon missing' }
+      - name: Windows app startup / native caption smoke check (when GUI session is available)
+        shell: pwsh
+        run: |
+          $app = (Resolve-Path 'build/bin/You-Want-Download.exe').Path
+          $process = Start-Process -FilePath $app -PassThru
+          try {
+            Start-Sleep -Seconds 6
+            $process.Refresh()
+            if ($process.HasExited) { throw "App exited during smoke check, code $($process.ExitCode)" }
+            if ($process.MainWindowHandle -ne 0) {
+              Add-Type -TypeDefinition @'
+              using System;
+              using System.Runtime.InteropServices;
+              public static class NativeStyle { [DllImport("user32.dll")] public static extern Int32 GetWindowLong(IntPtr hwnd, Int32 index); }
+          '@
+              $style = [uint32][NativeStyle]::GetWindowLong($process.MainWindowHandle, -16)
+              $required = [uint32]0x00CB0000
+              if (($style -band $required) -ne $required) { throw "Missing native caption / min / max / system menu (0x$($style.ToString('X')))" }
+              Write-Host 'Windows native caption, minimize, maximize and close/system menu verified.'
+            } else {
+              Write-Warning 'Runner has no interactive GUI session; native chrome must be field-tested on Windows.'
+            }
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+          }
       - name: Build NSIS installer and portable executable
         shell: pwsh
         run: |
           choco install nsis -y --no-progress
-          $env:PATH += ';C:\Program Files (x86)\NSIS'
-          $version = '0.2.0'
+          $version = '0.3.0'
           New-Item release -ItemType Directory -Force | Out-Null
           Copy-Item 'build/bin/You-Want-Download.exe' "release/You-Want-Download-$version-Portable.exe"
           Push-Location build/windows
@@ -66,27 +102,27 @@ jobs:
           Get-FileHash $portable -Algorithm SHA256 | Format-List
       - uses: actions/upload-artifact@v4
         with:
-          name: you-want-download-0.2.0-windows-x64
+          name: you-want-download-0.3.0-windows-x64
           path: release/*.exe
           if-no-files-found: error
   release:
-    name: Publish tested release
+    name: Publish tested v0.3.0 release
     needs: windows
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: you-want-download-0.2.0-windows-x64
+          name: you-want-download-0.3.0-windows-x64
           path: release
-      - name: Publish v0.2.0 if missing
+      - name: Publish release if missing
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view v0.2.0 >/dev/null 2>&1; then
-            echo 'v0.2.0 already published'; exit 0
+          if gh release view v0.3.0 >/dev/null 2>&1; then
+            echo 'v0.3.0 already published'; exit 0
           fi
-          gh release create v0.2.0 release/*.exe --target "${GITHUB_SHA}" \
-            --title 'You Want Download v0.2.0 - Lightweight redesign' \
-            --notes 'Redesigned compact interface, Go download engine, per-file connection control (1-16), queue, restart resume, Windows portable and installer. Requires WebView2. This release checks GitHub for updates but does not implement differential in-app updates yet. Unsigned binaries; see source and CI details.'
+          gh release create v0.3.0 release/*.exe --target "${GITHUB_SHA}" \
+            --title 'You Want Download v0.3.0 - Simple Add URL, settings and multi-link' \
+            --notes 'Clipboard URL prefill; single-field Add URL with optional advanced controls; functional IDM-style Tasks / Downloads / View / Tools / Help menus; native Windows caption and icon; saved Connection, Save To, Downloads, General, and Proxy settings; segmented multi-adapter IPv4 routing with per-socket Windows IP_UNICAST_IF, retries, adapter selection, and safe fallback. Linux unit/race tests and Chromium UI interactions run before packaging. A real dual-ISP speed boost is not guaranteed and requires on-device testing. Requires WebView2. Unsigned installer and portable. In-app differential updates are not supported.'

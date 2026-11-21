@@ -1,28 +1,29 @@
 # Contributing to You Want Download
 
-You Want Download is an open-source Windows download manager under the MIT License. Issues and pull requests are welcome.
+This is an MIT-licensed, free Windows download manager. All features must be implemented and verified before being advertised as complete.
 
-## Architecture
+## Structure
 
-- `internal/downloader/engine.go`: standard-library-only Go HTTP(S) download engine, persistent queue, segmented transfers, retries and safe assembly.
-- `internal/downloader/engine_test.go`: deterministic local HTTP tests; no third-party service or live internet required.
-- `main.go`, `app.go`: Wails v2 desktop shell, Go/JS bridge and Windows integration.
-- `frontend/dist/`: compact dependency-free UI with consistent inline SVG icons, dialogs, filters and per-file connections.
-- `tests/ui_smoke.py`: Chromium-based UI interaction tests using sample jobs, never claimed as real transfers.
-- `.github/workflows/release.yml`: Linux Go race tests, Windows engine tests, Wails packaging and release gating.
+- `internal/downloader/engine.go`: HTTP(S) engine, persistence, safe segmented downloads, download queue and retries.
+- `internal/downloader/routes.go`, `routes_windows.go`, `routes_other.go`: network discovery and per-socket interface selection. Windows uses `IP_UNICAST_IF`.
+- `internal/downloader/*_test.go`: local HTTP integration tests, segment-route simulation, file checks, and settings persistence.
+- `main.go`, `app.go`: Wails v2 Windows app with native OS chrome and clipboard bridge.
+- `frontend/dist/`: static, small HTML/CSS/JavaScript interface; no UI framework.
+- `tests/ui_smoke.py`: Chromium interaction tests using sample files and a mocked OS bridge.
+- `.github/workflows/release.yml`: Linux race/UI tests, Windows tests, Wails build, NSIS installer/portable release.
 
-## Before sending a PR
+## Local checks
 
-Run `go test -race -count=1 ./internal/downloader` and `node --check frontend/dist/app.js`; if you modify UI, run `python tests/ui_smoke.py` with Playwright/Chromium installed. Do not use `preview` sample downloads in production. For Windows changes, verify the Wails build and installer in Windows and confirm that a portable launch needs no installation.
+```bash
+go test -race -count=1 ./internal/downloader
+node --check frontend/dist/app.js
+python tests/ui_smoke.py  # pip install playwright; python -m playwright install chromium
+```
 
-Please test resumability on byte-range servers, no-range fallback, redirects, changing validators, interrupted transfers, filename collisions and download history after app exit. Preserve user files; removing a task must never delete the completed file without a separate explicit action. Add test coverage when fixing a bug. Keep UI interactions keyboard-accessible and error messages understandable.
+Add tests for resume from partial bytes, ETag changes, no-range fallback, retries, folder selection, route failures, and especially corrupted-range handling. Keep clipboard reads user-initiated. The multiple-network feature must never silently claim packet-level bonding or 2× speed.
+
+The Wails window uses the **native** frame and Windows title-bar buttons; do not replace them with unsafe custom controls. Test the NSIS install directory picker, executable icon, minimize/maximize/close, and dual-WAN behavior on actual Windows hardware when available. The test screenshot is real rendered HTML/CSS with clearly marked **sample downloads**, not a native window screenshot. Preserve user files when removing a download from the queue.
 
 ## Roadmap
 
-- Windows GUI automation on a Windows runner, live installer/uninstaller and Windows 10 compatibility tests.
-- Verified and signed differential updater with rollback, safe patch manifests, and repeated release-to-release tests.
-- Global speed limits, richer queues, proxy settings, drag/drop, tray controls, multi-language UI including Persian RTL.
-- Browser extension protocol registration and interception with explicit permissions and security review.
-- Torrent, media handling and file checksum verification as separate audited features.
-
-Please don't advertise unimplemented features as working. Package sizes and download speeds should be measured and reported instead of guessed.
+Automatic verified differential updater with rollback, real dual-ISP performance benchmarks on Windows, category-based folder rules, optional extension integration, speed caps, advanced queue schedules, and Persian localization. Please avoid claiming these features exist until tested.
